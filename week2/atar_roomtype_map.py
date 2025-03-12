@@ -3,6 +3,8 @@ import numpy as np
 import time
 import heapq
 import random
+from collections import deque
+
 #시각화 설정 / 좌상단이 원점이다
 WIDTH = 900
 ROWS = 100
@@ -21,25 +23,122 @@ GREY = (128, 128, 128)
 TURQUOISE = (64, 224, 208)
 BROWN = (165,42,42)
 
-def map_build1(grid, random_state=51):
-    start = grid[5][5]
-    end = grid[90][90]
+import random
+import numpy as np
+from collections import deque
+
+# 맵 생성 설정값
+ROOM_COUNT = 70  # 방 개수 고정
+ROOM_SIZE_RANGE = (5, 10)  # 방 크기 범위 축소
+
+def generate_maze_like_map(grid, random_state=67):
+    random.seed(random_state)
+    rows, cols = len(grid), len(grid[0])
+    
+    # 전체 맵을 벽(장애물)로 초기화
+    for row in grid:
+        for cell in row:
+            cell.make_barrier()
+
+    # 시작점과 종료점 부근을 빈 공간으로 설정
+    for i in range(1, 20):
+        for j in range(1, 20):
+            grid[i][j].reset()
+    for i in range(rows - 20, rows - 1):
+        for j in range(cols - 20, cols - 1):
+            grid[i][j].reset()
+    
+    # 방을 만들기 위한 격자 단위 설정
+    room_positions = []
+    
+    # 랜덤 방 생성
+    for _ in range(ROOM_COUNT):
+        w, h = random.randint(*ROOM_SIZE_RANGE), random.randint(*ROOM_SIZE_RANGE)
+        x, y = random.randint(1, rows - w - 2), random.randint(1, cols - h - 2)
+        room_positions.append((x, y, w, h))
+        for i in range(x, x + w):
+            for j in range(y, y + h):
+                grid[i][j].reset()  # 방 내부는 빈 공간
+    
+    # 방 연결 (최소 복도 생성)
+    connected_rooms = set()
+    random.shuffle(room_positions)  # 방 순서를 랜덤으로 섞음
+    for i in range(len(room_positions) - 1):
+        x1, y1, _, _ = room_positions[i]
+        x2, y2, _, _ = room_positions[i + 1]
+        
+        # 확률적으로 일부 방만 연결하여 복도를 줄임
+        if random.random() < 0.4:  # 60% 확률로 연결
+            continue
+        
+        # 최소한의 복도를 추가하여 연결 유지
+        mid_x, mid_y = (x1 + x2) // 2, (y1 + y2) // 2
+        
+        if random.choice([True, False]):
+            for x in range(min(x1, mid_x), max(x1, mid_x) + 1):
+                grid[x][y1].reset()
+                grid[x][y1+1].reset()
+            for x in range(min(mid_x, x2), max(mid_x, x2) + 1):
+                grid[x][mid_y].reset()
+                grid[x][mid_y+1].reset()
+        else:
+            for y in range(min(y1, mid_y), max(y1, mid_y) + 1):
+                grid[x1][y].reset()
+                grid[x1+1][y].reset()
+            for y in range(min(mid_y, y2), max(mid_y, y2) + 1):
+                grid[x2][y].reset()
+                grid[x2+1][y].reset()
+    
+    # 시작점과 종료점 설정 (접근 가능하도록 조정)
+    start = grid[2][2]
+    end = grid[rows - 3][cols - 3]
     start.make_start()
     end.make_end()
-    total_cells = ROWS * ROWS
-    num_barriers = int(total_cells * 0.3 )  # 전체의 20%를 장애물로 설정
-    random.seed(random_state)
-
-    barrier_positions = random.sample(
-        [(i, j) for i in range(len(grid)) for j in range(len(grid[0]))
-         if (i, j) != (5, 5) and (i, j) != (90, 90)], num_barriers
-    )
-
-    for row, col in barrier_positions:
-        grid[row][col].make_barrier()
-
+    
+    # 접근 가능성 확인 (BFS 탐색) 및 추가 복도 생성
+    if not is_fully_connected(grid, start):
+        print("경로가 단절됨: 추가 복도를 생성합니다.")
+        add_extra_corridors(grid)
+    
     return start, end
 
+def is_fully_connected(grid, start):
+    """BFS로 모든 빈 공간이 접근 가능한지 확인."""
+    rows, cols = len(grid), len(grid[0])
+    visited = set()
+    queue = deque([start])
+    
+    while queue:
+        cell = queue.popleft()
+        if cell in visited:
+            continue
+        visited.add(cell)
+        
+        for neighbor in a_star.get_neighbors(grid, cell):
+            if neighbor not in visited:
+                queue.append(neighbor)
+    
+    # 모든 빈 공간이 방문되었는지 확인
+    for row in grid:
+        for cell in row:
+            if cell.color != "BLACK" and cell not in visited:
+                return False  # 고립된 공간이 있음
+    return True
+
+def add_extra_corridors(grid):
+    """고립된 공간을 연결하기 위해 랜덤 벽을 허물어 복도를 추가"""
+    rows, cols = len(grid), len(grid[0])
+    for _ in range(5):  # 최대 5개의 추가 복도 생성 시도 (최소한으로 줄임)
+        x, y = random.randint(1, rows - 2), random.randint(1, cols - 2)
+        if grid[x][y].is_barrier():
+            grid[x][y].reset()  # 벽을 허물어 복도를 생성
+        
+        start = grid[2][2]
+        if is_fully_connected(grid, start):
+            print("추가 복도 생성 완료: 모든 공간이 연결되었습니다.")
+            return  # 모든 공간이 연결되면 종료
+    print("추가 복도 생성 후에도 일부 지역이 고립됨. 더 많은 복도가 필요할 수 있음.")
+    
 class grids:
 
     def __init__(self, row, col, width, total_rows):
@@ -271,7 +370,8 @@ def main(win, width):
     searched_area = 0
     elapsed_times = []  # 소요 시간을 저장할 리스트
 
-    start, end = map_build1(grid)
+    start, end = generate_maze_like_map(grid)
+    
     #기존엔 시간에 포함된걸 밖으로 뺌
     for row in grid:
         for spot in row:
@@ -315,7 +415,7 @@ def main(win, width):
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE and start and end:
-                    while count <= 30:
+                    while count <= 1:
                         searched_area = 0
                         start_time = time.time()
                         a_star.algorithm(lambda: grids.draw(win, grid, ROWS, width), grid, start, end)
